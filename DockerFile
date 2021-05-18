@@ -1,0 +1,52 @@
+FROM chef/chefworkstation:latest
+
+ENV http_proxy="http://add-proxy.com:8080" \
+https_proxy="http://add-proxy.com:8080" \
+HTTP_PROXY="http://add-proxy.com:8080" \
+HTTPS_PROXY="http://add-proxy.com:8080"
+
+RUN export http_proxy="http://add-proxy.com:8080" && \
+export https_proxy="http://add-proxy.com:8080" && \
+mkdir /usr/share/ca-certificates/certs && chmod 755 /usr/share/ca-certificates/certs && \
+apt-get -y update && apt-get install -y openjdk-8-jre unzip curl make gcc && apt-get clean && \
+chef env --chef-license accept && chef gem install kitchen-openstack
+
+RUN curl -L https://releases.hashicorp.com/vault/0.6.0/vault_0.6.0_linux_amd64.zip -o /tmp/vault.zip && \
+unzip /tmp/vault.zip -d /usr/local/bin && \
+rm -f tmp/vault.zip
+
+RUN mkdir /root/.ssh && chmod 0700 /root/.ssh
+COPY id_rsa /root/.ssh/id_rsa
+
+RUN mkdir /root/.chef
+COPY user-pipeline.pem /root/.chef/user-pipeline.pem
+
+COPY useradd /bin
+
+ENV JAVA_HOME /usr/lib/jvm/java-8-openjdk-amd64/jre
+ENV CERTS_PATH /usr/local/share/certificates
+
+# Downloading certs
+RUN curl -k -L "https://add-source.com/cert/CAs/PrivateRootCA.base64.zip" -o /tmp/cert-root-ca.zip && \
+unzip -p /tmp/cert-root-ca.zip > "$CERTS_PATH/cert-root-ca.crt" && \
+rm -f /tmp/cert-root-ca.zip
+
+RUN curl -k -L "https://add-source.com/cert/CAs/ENT_Private_SSL_CA.base64.zip" -o /tmp/ssl-ca.zip && \
+unzip -p /tmp/ssl-ca.zip > "$CERTS_PATH/ssl-ca.crt" && \
+rm -f /tmp/ssl-ca.zip
+
+RUN cat $CERTS_PATH/ssl-ca.crt  >> /opt/chef-workstation/embedded/ssl/certs/cacert.pem && \
+cat $CERTS_PATH/ssl-ca.crt >> /opt/chef-workstation/embedded/ssl/certs/cacert.pem && \
+update-ca-certificates && \
+git config --global http.sslverify false
+
+# Inserting certs to the Java trust store
+RUN "$JAVA_HOME/bin/keytool" -import -trustcacerts -noprompt -file "$CERTS_PATH/cert-root-ca.crt" -alias cert-root-ca -keystore "$JAVA_HOME/lib/security/cacerts" -storepass changeit && \
+    "$JAVA_HOME/bin/keytool" -import -trustcacerts -noprompt -file "$CERTS_PATH/ssl-ca.crt" -alias ssl-ca -keystore "$JAVA_HOME/lib/security/cacerts" -storepass changeit
+
+ENV http_proxy="" \
+https_proxy="" \
+HTTP_PROXY="" \
+HTTPS_PROXY="" \
+no_proxy="localaddress,localhost,127.0.0.1,add-proxy.com" \
+NO_PROXY="localaddress,localhost,127.0.0.1,add-proxy.com"
